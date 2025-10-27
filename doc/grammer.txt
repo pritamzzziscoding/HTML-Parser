@@ -1,0 +1,37 @@
+A simplified Context-Free Grammar (CFG) for our HTML subset.
+
+This is a high-level representation.
+
+Program     ::= NodeList
+
+NodeList    ::= Node NodeList
+|  ε                  (epsilon, or empty)
+
+Node        ::= ElementNode
+|  TextNode
+
+ElementNode ::= OpenTag Attributes CloseTag
+|  OpenTag Attributes SelfCloseTag
+
+OpenTag     ::= '<' TAG_NAME '>'
+|  '<' TAG_NAME
+
+SelfCloseTag::= '/>'
+|  '>'              (Implicitly, for tags like 
+
+
+
+)
+
+CloseTag    ::= '</' TAG_NAME '>'
+
+Attributes  ::= Attribute Attributes
+|  ε
+
+Attribute   ::= ATTR_NAME '=' ATTR_VALUE
+|  ATTR_NAME        (Boolean attribute)
+
+TextNode    ::= TEXT
+
+TERMINALS:
+<, >, </, />, =, TAG_NAME, ATTR_NAME, ATTR_VALUE, TEXT
