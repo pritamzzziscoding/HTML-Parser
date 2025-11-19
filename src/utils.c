@@ -1,8 +1,3 @@
-/**
- * src/utils.c
- *
- * Implementation of utility functions.
- */
 #include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,8 +28,6 @@ char* read_file_to_buffer(const char* filename) {
         perror("Error opening file");
         return NULL;
     }
-
-    // Seek to the end to find the file size
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     if (file_size == -1) {
@@ -42,13 +35,8 @@ char* read_file_to_buffer(const char* filename) {
         fclose(file);
         return NULL;
     }
-    // Rewind to the beginning
     fseek(file, 0, SEEK_SET);
-
-    // Allocate buffer
     char* buffer = (char*)safe_malloc(file_size + 1);
-
-    // Read the file
     size_t bytes_read = fread(buffer, 1, file_size, file);
     if (bytes_read < (size_t)file_size) {
         if (ferror(file)) {
@@ -60,10 +48,7 @@ char* read_file_to_buffer(const char* filename) {
         free(buffer);
         return NULL;
     }
-
-    // Null-terminate the buffer
     buffer[file_size] = '\0';
-
     fclose(file);
     return buffer;
 }

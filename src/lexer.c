@@ -1,17 +1,9 @@
-/**
- * src/lexer.c
- *
- * Implementation of the Lexer (Tokenizer).
- */
 #include "lexer.h"
 #include "utils.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-// --- Lexer Initialization ---
-
 Lexer* lexer_init(const char* source) {
     Lexer* lexer = (Lexer*)safe_malloc(sizeof(Lexer));
     lexer->source = source;
@@ -19,41 +11,29 @@ Lexer* lexer_init(const char* source) {
     lexer->current = 0;
     lexer->line = 1;
     lexer->col = 1;
+    lexer->insideTag = 0;
     return lexer;
 }
-
 void lexer_free(Lexer* lexer) {
     if (lexer) {
         free(lexer);
     }
 }
 
-// --- Token Helper Functions ---
-
-/**
- * @brief Creates a token with the given type.
- * The lexeme is copied from the lexer's source.
- */
 static Token make_token(Lexer* lexer, TokenType type) {
     Token token;
     token.type = type;
-    
-    // Calculate length and copy the lexeme
     int length = lexer->current - lexer->start;
     char* lexeme = (char*)safe_malloc(length + 1);
     strncpy(lexeme, lexer->source + lexer->start, length);
     lexeme[length] = '\0';
-    
     token.lexeme = lexeme;
     token.line = lexer->line;
-    token.col = lexer->col - length; // Start column of the token
+    token.col = lexer->col - length;
     
     return token;
 }
 
-/**
- * @brief Creates an error token with a message.
- */
 static Token error_token(Lexer* lexer, const char* message) {
     Token token;
     token.type = TOKEN_ERROR;
@@ -69,9 +49,6 @@ void free_token_lexeme(Token* token) {
         token->lexeme = NULL;
     }
 }
-
-// --- Lexer Scanning Helpers ---
-
 static int is_at_end(Lexer* lexer) {
     return lexer->source[lexer->current] == '\0';
 }
@@ -104,42 +81,36 @@ static void skip_whitespace(Lexer* lexer) {
             case ' ':
             case '\r':
             case '\t':
-            case '\n': // Also track newlines
+            case '\n':
                 advance(lexer);
                 break;
-            // Handle HTML comments <!-- ... -->
             case '<':
                 if (peek_next(lexer) == '!') {
                     if (lexer->source[lexer->current + 2] == '-' && lexer->source[lexer->current + 3] == '-') {
-                        // Start of a comment
                         advance(lexer); // <
                         advance(lexer); // !
                         advance(lexer); // -
                         advance(lexer); // -
                         while (!is_at_end(lexer) && 
-                               !(peek(lexer) == '-' && 
-                                 peek_next(lexer) == '-' && 
-                                 lexer->source[lexer->current + 2] == '>')) {
+                            !(peek(lexer) == '-' && 
+                                peek_next(lexer) == '-' && 
+                                lexer->source[lexer->current + 2] == '>')) {
                             advance(lexer);
                         }
                         if (!is_at_end(lexer)) {
-                            advance(lexer); // -
-                            advance(lexer); // -
-                            advance(lexer); // >
+                            advance(lexer);
+                            advance(lexer);
+                            advance(lexer);
                         }
                         break;
                     }
                 }
-                // Fallthrough if not a comment
             default:
                 return;
         }
     }
 }
 
-// --- State-based Scanning Functions ---
-
-// State for when lexer is inside a tag (e.g., <p id="foo">)
 static Token scan_inside_tag(Lexer* lexer) {
     lexer->start = lexer->current;
     char c = advance(lexer);
@@ -149,25 +120,23 @@ static Token scan_inside_tag(Lexer* lexer) {
         case '=': return make_token(lexer, TOKEN_ATTR_EQUALS);
         case '/':
             if (peek(lexer) == '>') {
-                advance(lexer); // Consume '>'
+                advance(lexer);
                 return make_token(lexer, TOKEN_SELF_CLOSE);
             }
-            break; // Not a self-close, maybe an error
+            break;
             
         case '"':
         case '\'':
-            // Attribute value
             while (peek(lexer) != c && !is_at_end(lexer)) {
                 advance(lexer);
             }
             if (is_at_end(lexer)) {
                 return error_token(lexer, "Unterminated string literal.");
             }
-            advance(lexer); // Consume the closing quote
+            advance(lexer);
             return make_token(lexer, TOKEN_ATTR_VALUE);
 
         default:
-            // Attribute name
             if (isalpha(c)) {
                 while (isalnum(peek(lexer)) || peek(lexer) == '-') {
                     advance(lexer);
@@ -178,19 +147,13 @@ static Token scan_inside_tag(Lexer* lexer) {
     
     return error_token(lexer, "Unexpected character inside tag.");
 }
-
-// State for when lexer is outside a tag (parsing text or new tags)
 static Token scan_outside_tag(Lexer* lexer) {
     lexer->start = lexer->current;
-
-    // 1. Handle tags
     if (peek(lexer) == '<') {
-        advance(lexer); // Consume '<'
-        
+        advance(lexer); 
         if (peek(lexer) == '/') {
-            // Close tag: </tag>
-            advance(lexer); // Consume '/'
-            lexer->start = lexer->current; // Mark start of tag name
+            advance(lexer);
+            lexer->start = lexer->current; 
             while (isalpha(peek(lexer))) {
                 advance(lexer);
             }
@@ -199,7 +162,7 @@ static Token scan_outside_tag(Lexer* lexer) {
         
         if (isalpha(peek(lexer))) {
             // Open tag: <tag
-            lexer->start = lexer->current; // Mark start of tag name
+            lexer->start = lexer->current;
             while (isalpha(peek(lexer))) {
                 advance(lexer);
             }
@@ -208,28 +171,15 @@ static Token scan_outside_tag(Lexer* lexer) {
         
         return error_token(lexer, "Invalid tag syntax.");
     }
-
-    // 2. Handle text content
-    // Consume text until the next '<' or EOF
     while (peek(lexer) != '<' && !is_at_end(lexer)) {
         advance(lexer);
     }
     
-    // We've hit a '<' or EOF. The text is from start to current.
-    // Check if we actually consumed any text
     if (lexer->current > lexer->start) {
         return make_token(lexer, TOKEN_TEXT);
     }
-
-    // If we're here, it means we hit '<' immediately, which should be
-    // handled by the next call to get_next_token.
-    // Or we are at the end of the file.
     return make_token(lexer, TOKEN_EOF);
 }
-
-
-// --- Main get_next_token Function ---
-
 Token get_next_token(Lexer* lexer) {
     skip_whitespace(lexer);
     lexer->start = lexer->current;
@@ -237,102 +187,64 @@ Token get_next_token(Lexer* lexer) {
     if (is_at_end(lexer)) {
         return make_token(lexer, TOKEN_EOF);
     }
-    
-    char c = peek(lexer);
+    if (lexer->insideTag) {
+        char c = peek(lexer);
 
-    if (c == '<') {
-        // --- Tag-related tokens ---
-        advance(lexer); // Consume '<'
-        
-        if (peek(lexer) == '/') {
-            // Close tag: </tag>
-            advance(lexer); // Consume '/'
-            lexer->start = lexer->current; // Mark start of tag name
+        if (c == '>') {
+            advance(lexer);
+            lexer->insideTag = 0;
+            return make_token(lexer, TOKEN_GT);
+        } 
+        else if (c == '=') {
+            advance(lexer);
+            return make_token(lexer, TOKEN_ATTR_EQUALS);
+        } 
+        else if (c == '"' || c == '\'') {
+            advance(lexer);
+            lexer->start = lexer->current;
+            while (peek(lexer) != c && !is_at_end(lexer)) {
+                advance(lexer);
+            }
+            if (is_at_end(lexer)) return error_token(lexer, "Unterminated string.");
+            Token tok = make_token(lexer, TOKEN_ATTR_VALUE);
+            advance(lexer);
+            return tok;
+        } 
+        else if (isalpha(c)) {
             while (isalnum(peek(lexer)) || peek(lexer) == '-') {
                 advance(lexer);
             }
-            return make_token(lexer, TOKEN_CLOSE_TAG);
-        }
-        
-        if (isalpha(peek(lexer))) {
-            // Open tag: <tag
-            lexer->start = lexer->current; // Mark start of tag name
-            while (isalnum(peek(lexer)) || peek(lexer) == '-') {
-                advance(lexer);
-            }
-            return make_token(lexer, TOKEN_OPEN_TAG);
-        }
-        
-        return error_token(lexer, "Invalid tag syntax after '<'.");
-    } 
-    else if (c == '>') {
-        // --- Inside-tag tokens ---
-        advance(lexer);
-        return make_token(lexer, TOKEN_GT);
-    }
-    else if (c == '=') {
-        advance(lexer);
-        return make_token(lexer, TOKEN_ATTR_EQUALS);
-    }
-    else if (c == '/') {
-        if (peek_next(lexer) == '>') {
-            advance(lexer); // Consume '/'
-            advance(lexer); // Consume '>'
+            return make_token(lexer, TOKEN_ATTR_NAME);
+        } 
+        else if (c == '/' && peek_next(lexer) == '>') {
+            advance(lexer);
+            advance(lexer); 
+            lexer->insideTag = 0;
             return make_token(lexer, TOKEN_SELF_CLOSE);
         }
-        return error_token(lexer, "Unexpected '/'.");
-    }
-    else if (c == '"' || c == '\'') {
-        // Attribute value
-        advance(lexer); // Consume opening quote
-        lexer->start = lexer->current; // Mark start of value
-        while (peek(lexer) != c && !is_at_end(lexer)) {
-            advance(lexer);
-        }
-        if (is_at_end(lexer)) {
-            return error_token(lexer, "Unterminated string literal.");
-        }
-        Token token = make_token(lexer, TOKEN_ATTR_VALUE);
-        advance(lexer); // Consume the closing quote
-        return token;
-    }
-    else if (isalpha(c)) {
-        // Could be TEXT or ATTR_NAME. We assume the *parser* knows
-        // which state it's in. The lexing rule is the same:
-        // read a block of text.
-        // If it's text, it stops at '<'.
-        // If it's an attr_name, it stops at '=' or '>'.
-        
-        // Let's refine this: We need two "modes" for the lexer.
-        // But the parser can control this.
-        // Let's assume the parser calls a *different* function
-        // `get_text_token()` if it expects text.
-        
-        // For simplicity, let's make THIS function state-agnostic.
-        // If it sees a letter, it must be an ATTR_NAME,
-        // because TEXT is handled by the `else` block.
-        while (isalnum(peek(lexer)) || peek(lexer) == '-') {
-            advance(lexer);
-        }
-        return make_token(lexer, TOKEN_ATTR_NAME);
-    }
-    else {
-        // --- Text Node ---
-        // If it's not a tag or any tag-related character,
-        // it must be text content.
-        // Read until the next '<' or EOF.
-        while (peek(lexer) != '<' && !is_at_end(lexer)) {
-            advance(lexer);
-        }
-        
-        if (lexer->current > lexer->start) {
-            return make_token(lexer, TOKEN_TEXT);
-        }
-    }
-    
-    if (is_at_end(lexer)) {
-         return make_token(lexer, TOKEN_EOF);
-    }
 
-    return error_token(lexer, "Unexpected character.");
+        return error_token(lexer, "Unexpected char inside tag.");
+    }
+    char c = peek(lexer);
+    if (c == '<') {
+        advance(lexer);
+        if (peek(lexer) == '/') {
+            advance(lexer);
+            lexer->start = lexer->current;
+            while (isalnum(peek(lexer)) || peek(lexer) == '-') advance(lexer);
+            lexer->insideTag = 1;
+            return make_token(lexer, TOKEN_CLOSE_TAG);
+        } else if (isalpha(peek(lexer))) {
+            lexer->start = lexer->current;
+            while (isalnum(peek(lexer)) || peek(lexer) == '-') advance(lexer);
+            lexer->insideTag = 1;
+            return make_token(lexer, TOKEN_OPEN_TAG);
+        } else {
+            return error_token(lexer, "Invalid tag start.");
+        }
+    }
+    while (peek(lexer) != '<' && !is_at_end(lexer)) {
+        advance(lexer);
+    }
+    return make_token(lexer, TOKEN_TEXT);
 }
