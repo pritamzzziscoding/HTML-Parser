@@ -230,12 +230,6 @@ static Token scan_outside_tag(Lexer* lexer) {
 
 // --- Main get_next_token Function ---
 
-// A simple state machine:
-// We are either "outside" a tag (looking for text or <)
-// or "inside" a tag (looking for >, attributes, etc.)
-// We track this state *outside* the lexer, in the parser.
-// The lexer just needs to know what to do based on the *next* char.
-
 Token get_next_token(Lexer* lexer) {
     skip_whitespace(lexer);
     lexer->start = lexer->current;
