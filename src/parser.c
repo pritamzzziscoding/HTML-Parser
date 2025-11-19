@@ -1,74 +1,41 @@
-/**
- * src/parser.c
- *
- * Implementation of the Recursive Descent Parser.
- */
 #include "parser.h"
-#include "utils.h" // For safe_strdup
+#include "utils.h" 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// --- Forward Declarations of Static Helper Functions ---
 
-/**
- * @brief Consumes the current token and gets the next one from the lexer.
- */
+
 static void advance(Parser* parser);
 
-/**
- * @brief Checks if the current token is of the expected type.
- * If it is, consumes it and returns true.
- * If not, sets an error and returns false.
- */
+
 static int expect(Parser* parser, TokenType type, const char* error_msg);
 
-/**
- * @brief Checks if the current token matches the given type.
- */
+
 static int check(Parser* parser, TokenType type);
 
-/**
- * @brief The core recursive function to parse a single element.
- * Handles <tag>, attributes, children, and </tag>.
- */
 static DomNode* parse_element(Parser* parser);
 
-/**
- * @brief Parses a list of attributes inside an opening tag.
- */
+
 static void parse_attributes(Parser* parser, DomNode* node);
 
-/**
- * @brief Parses a list of child nodes (either elements or text).
- * Stops when it finds a closing tag or EOF.
- */
+
 static DomNode* parse_children(Parser* parser);
 
-/**
- * @brief Parses a single node, which could be an element or text.
- */
+
 static DomNode* parse_node(Parser* parser);
 
-/**
- * @brief Checks if a tag is a known self-closing tag (e.g., "img", "br").
- */
 static int is_self_closing_tag(const char* tag_name);
 
-/**
- * @brief Sets the parser's error state.
- */
+
 static void parser_error(Parser* parser, const char* message);
 
-// --- Public Function Implementations ---
 
 Parser* parser_init(Lexer* lexer) {
     Parser* parser = (Parser*)safe_malloc(sizeof(Parser));
     parser->lexer = lexer;
     parser->has_error = 0;
     parser->error_message = NULL;
-    
-    // Initialize with the first token
     parser->previous_token.lexeme = NULL;
     parser->current_token.lexeme = NULL;
     advance(parser);
@@ -81,16 +48,12 @@ void parser_free(Parser* parser) {
         free_token_lexeme(&parser->current_token);
         free_token_lexeme(&parser->previous_token);
         free(parser->error_message);
-        // Note: The lexer is freed separately by the caller
         free(parser);
     }
 }
 
 DomNode* parse(Parser* parser) {
-    // Create a dummy root node for the document
-    DomNode* root = create_element_node("#document");
-    
-    // Parse all top-level nodes as children of the root
+    DomNode* root = create_element_node("<!Doctype html>");
     root->first_child = parse_children(parser);
 
     if (parser->has_error) {
@@ -101,38 +64,28 @@ DomNode* parse(Parser* parser) {
     return root;
 }
 
-// --- Static Helper Function Implementations ---
 
 static void parser_error(Parser* parser, const char* message) {
-    if (parser->has_error) return; // Only log the first error
+    if (parser->has_error) return;
     
     parser->has_error = 1;
-    
-    // Format a detailed error message
     char buffer[512];
     snprintf(buffer, sizeof(buffer), "[Line %d, Col %d] Error: %s. (Got token %d: '%s')",
-             parser->current_token.line,
-             parser->current_token.col,
-             message,
-             parser->current_token.type,
-             parser->current_token.lexeme);
-             
+            parser->current_token.line,
+            parser->current_token.col,
+            message,
+            parser->current_token.type,
+            parser->current_token.lexeme);
+            
     parser->error_message = safe_strdup(buffer);
 }
 
 static void advance(Parser* parser) {
     if (parser->has_error) return;
-
-    // Free the *previous* token's lexeme
     free_token_lexeme(&parser->previous_token);
 
-    // Move current to previous
     parser->previous_token = parser->current_token;
-
-    // Get the next token from the lexer
     parser->current_token = get_next_token(parser->lexer);
-    
-    // Check for lexer errors
     if (parser->current_token.type == TOKEN_ERROR) {
         parser_error(parser, parser->current_token.lexeme);
     }
@@ -157,28 +110,20 @@ static DomNode* parse_node(Parser* parser) {
     }
     if (check(parser, TOKEN_TEXT)) {
         DomNode* node = create_text_node(parser->current_token.lexeme);
-        advance(parser); // Consume the text token
+        advance(parser); 
         return node;
     }
-    
-    // If it's not text or an element, it's an error (or EOF/CloseTag)
     return NULL;
 }
 
 static DomNode* parse_children(Parser* parser) {
     DomNode* first_child = NULL;
     DomNode* current_child = NULL;
-
-    // Loop until we hit a closing tag or the end of the file
     while (!check(parser, TOKEN_CLOSE_TAG) && !check(parser, TOKEN_EOF)) {
         if (parser->has_error) return first_child;
 
         DomNode* child_node = parse_node(parser);
         if (child_node == NULL) {
-            // This might happen if parse_node encounters an unexpected token
-            // e.g. stray '>', '=', etc.
-            // We can either error out or try to skip it.
-            // Let's error out for robustness.
             if (!check(parser, TOKEN_EOF)) {
                  parser_error(parser, "Unexpected token while parsing children.");
             }
@@ -190,7 +135,7 @@ static DomNode* parse_children(Parser* parser) {
             current_child = child_node;
         } else {
             current_child->next_sibling = child_node;
-            child_node->parent = current_child->parent; // Set same parent
+            child_node->parent = current_child->parent;
             current_child = child_node;
         }
     }
@@ -199,22 +144,17 @@ static DomNode* parse_children(Parser* parser) {
 }
 
 static void parse_attributes(Parser* parser, DomNode* node) {
-    // Loop as long as we see attribute names
     while (check(parser, TOKEN_ATTR_NAME)) {
         if (parser->has_error) return;
-
         char* name = safe_strdup(parser->current_token.lexeme);
-        advance(parser); // Consume attr name
+        advance(parser); 
         
-        char* value = safe_strdup("true"); // Default for boolean attributes
+        char* value = safe_strdup("true");
 
         if (check(parser, TOKEN_ATTR_EQUALS)) {
             advance(parser); // Consume '='
             if (expect(parser, TOKEN_ATTR_VALUE, "Expected attribute value.")) {
-                free(value); // Free the default "true"
-                // The lexeme from ATTR_VALUE token has quotes, let's strip them
-                // Our lexer is designed to strip them, but if not, do it here.
-                // Our lexer *doesn't* include the quotes in the lexeme.
+                free(value);
                 value = safe_strdup(parser->previous_token.lexeme);
             }
         }
@@ -226,11 +166,10 @@ static void parse_attributes(Parser* parser, DomNode* node) {
 }
 
 static int is_self_closing_tag(const char* tag_name) {
-    // List of common self-closing tags
     const char* self_closing[] = {
         "area", "base", "br", "col", "embed", "hr", "img", 
         "input", "link", "meta", "param", "source", "track", "wbr",
-        NULL // Sentinel
+        NULL 
     };
     
     for (int i = 0; self_closing[i]; i++) {
@@ -242,45 +181,31 @@ static int is_self_closing_tag(const char* tag_name) {
 }
 
 static DomNode* parse_element(Parser* parser) {
-    // Assumes the TOKEN_OPEN_TAG has just been checked
     DomNode* node = create_element_node(parser->current_token.lexeme);
-    advance(parser); // Consume open tag token
-    
-    // 2. Parse attributes
+    advance(parser);
     parse_attributes(parser, node);
-    if (parser->has_error) return node; // Return partially built node
-
-    // 3. Handle closing
+    if (parser->has_error) return node;
     if (check(parser, TOKEN_SELF_CLOSE)) {
-        // Case 1: <img />
-        advance(parser); // Consume "/>"
+        advance(parser); 
         return node;
     }
 
     if (check(parser, TOKEN_GT)) {
-        // Case 2: <p> ... </p> or <br>
-        advance(parser); // Consume ">"
-        
-        // Check if it's a *known* self-closing tag that was written as <br>
+        advance(parser); 
         if (is_self_closing_tag(node->tag_name)) {
             return node;
         }
-
-        // 4. Parse children
         node->first_child = parse_children(parser);
         if (parser->has_error) return node;
-        
-        // 5. Expect closing tag
         if (check(parser, TOKEN_CLOSE_TAG)) {
-            // Check for mismatch
             if (strcmp(parser->current_token.lexeme, node->tag_name) != 0) {
                 char msg[256];
                 snprintf(msg, sizeof(msg), "Mismatched tag. Expected </%s> but got </%s>",
-                         node->tag_name, parser->current_token.lexeme);
+                        node->tag_name, parser->current_token.lexeme);
                 parser_error(parser, msg);
-                return node; // Return node, error is flagged
+                return node; 
             }
-            // All good
+
             advance(parser); // Consume close tag
             if (!expect(parser, TOKEN_GT, "Expected '>' after closing tag name.")) {
                 return node;
@@ -293,8 +218,6 @@ static DomNode* parse_element(Parser* parser) {
         }
         return node;
     }
-    
-    // If we get here, something is wrong
     parser_error(parser, "Expected '>' or '/>' after tag attributes.");
     return node;
 }
